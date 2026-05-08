@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ルドー (Ludo)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background-color: #f3f4f6;
+            touch-action: manipulation; /* スマホでのダブルタップズーム防止 */
+        }
+
+        .grid-15 {
+            display: grid;
+            grid-template-columns: repeat(15, minmax(0, 1fr));
+            grid-template-rows: repeat(15, minmax(0, 1fr));
+        }
+
+        /* サイコロのアニメーション */
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-10deg); }
+            20% { transform: translate(-3px, 0px) rotate(10deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(10deg); }
+            50% { transform: translate(-1px, 2px) rotate(-10deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-10deg); }
+            80% { transform: translate(-1px, -1px) rotate(10deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-10deg); }
+        }
+
+        .dice-rolling {
+            animation: shake 0.3s;
+            animation-iteration-count: infinite;
+        }
+
+        /* ピースのアニメーション */
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        
+        .piece-enter {
+            animation: pop 0.3s ease-out forwards;
+        }
+
+        /* 星マークの調整 */
+        .star-icon {
+            font-size: clamp(0.5rem, 1.5vw, 1.2rem);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center py-6 px-2 min-h-screen">
+
+    <div class="max-w-4xl w-full flex flex-col md:flex-row gap-6">
+        
+        <!-- 左側：メインボード -->
+        <div class="flex-1 flex flex-col items-center">
+            <h1 class="text-3xl font-bold text-gray-800 mb-4 drop-shadow-sm">ルドー (Ludo)</h1>
+            
+            <!-- ボードコンテナ -->
+            <div id="board-container" class="w-full max-w-[500px] aspect-square bg-gray-300 p-1 rounded-xl shadow-xl grid-15 gap-[1px]">
+                <!-- JavaScriptでセルを生成します -->
+            </div>
+        </div>
+
+        <!-- 右側：コントロールパネル -->
+        <div class="w-full md:w-80 flex flex-col gap-4 mt-2 md:mt-12">
+            
+            <!-- ターン情報 -->
+            <div class="bg-white p-5 rounded-xl shadow-md border-t-4 transition-colors duration-300" id="turn-card">
+                <h2 class="text-lg font-bold text-gray-600 mb-1">現在のターン</h2>
+                <div class="text-3xl font-bold mb-2 flex items-center gap-2" id="turn-name">
+                    <!-- 名前が入ります -->
+                </div>
+                <p id="game-message" class="text-sm text-gray-600 font-bold min-h-[2.5rem]">
+                    ゲームを開始します。サイコロを振ってください。
+                </p>
+            </div>
+
+            <!-- サイコロエリア -->
+            <div class="bg-white p-5 rounded-xl shadow-md flex flex-col items-center justify-center gap-4">
+                <div class="text-gray-500 font-bold">サイコロ</div>
+                <button id="dice-btn" onclick="rollDice()" class="w-24 h-24 bg-gray-100 rounded-2xl shadow-inner flex items-center justify-center text-6xl cursor-pointer hover:bg-gray-200 transition-colors border-2 border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+                    🎲
+                </button>
+            </div>
+
+            <!-- リセットボタン -->
+            <button onclick="initGame()" class="mt-auto py-3 px-4 bg-gray-800 text-white font-bold rounded-lg hover:bg-gray-700 shadow-md transition-colors">
+                ゲームをリセット
+            </button>
+            
+            <!-- ルール説明 -->
+            <div class="bg-blue-50 p-4 rounded-lg text-xs text-blue-800 shadow-sm mt-4">
+                <ul class="list-disc list-inside space-y-1">
+                    <li>サイコロで<span class="font-bold text-red-500">6</span>が出ると、コマをスタート地点に出せます。</li>
+                    <li>6が出た場合はもう一度サイコロを振れます。</li>
+                    <li>他のプレイヤーのコマが止まっているマスに止まると、そのコマをベースに戻せます（★マークの安全地帯を除く）。</li>
+                    <li>4つのコマすべてを中央のゴールに入れたプレイヤーの勝利です。</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === 定数・ゲーム設定 ===
+        const DICE_FACES = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+        
+        // メイントラックの座標（時計回りに52マス）
+        const path = [
+            [6,0], [6,1], [6,2], [6,3], [6,4], [6,5], // 左アーム 上段
+            [5,6], [4,6], [3,6], [2,6], [1,6], [0,6], // 上アーム 左段
+            [0,7], [0,8],                             // 上アーム 頂点
+            [1,8], [2,8], [3,8], [4,8], [5,8],        // 上アーム 右段
+            [6,9], [6,10], [6,11], [6,12], [6,13], [6,14], // 右アーム 上段
+            [7,14], [8,14],                           // 右アーム 端
+            [8,13], [8,12], [8,11], [8,10], [8,9],    // 右アーム 下段
+            [9,8], [10,8], [11,8], [12,8], [13,8], [14,8], // 下アーム 右段
+            [14,7], [14,6],                           // 下アーム 底
+            [13,6], [12,6], [11,6], [10,6], [9,6],    // 下アーム 左段
+            [8,5], [8,4], [8,3], [8,2], [8,1], [8,0], // 左アーム 下段
+            [7,0]                                     // 左アーム 端
+        ];
+
+        // 各プレイヤーのスタートマスのインデックス（path配列内）
+        const startSpots = [1, 14, 27, 40];
+        
+        // 安全地帯（スタートマス + その他の安全地帯）
+        const safeSpots = [1, 9, 14, 22, 27, 35, 40, 48];
+
+        // ホームトラックの座標（ゴールへ向かう道 5マス）
+        const homeTracks = {
+            0: [[7,1], [7,2], [7,3], [7,4], [7,5]],       // 赤
+            1: [[1,7], [2,7], [3,7], [4,7], [5,7]],       // 緑
+            2: [[7,13], [7,12], [7,11], [7,10], [7,9]],   // 黄
+            3: [[13,7], [12,7], [11,7], [10,7], [9,7]]    // 青
+        };
+
+        // ベース内での待機位置（コマ4つ分）
+        const basePositions = {
+            0: [[2,2], [2,3], [3,2], [3,3]],       // 赤
+            1: [[2,11], [2,12], [3,11], [3,12]],   // 緑
+            2: [[11,11], [11,12], [12,11], [12,12]], // 黄
+            3: [[11,2], [11,3], [12,2], [12,3]]    // 青
+        };
+
+        // ゴールしたコマを配置する中央のマス
+        const finishSpots = { 0: [7,6], 1: [6,7], 2: [7,8], 3: [8,7] };
+
+        // プレイヤー定義
+        const PLAYER_CONFIG = [
+            { id: 0, key: 'red', name: '赤プレイヤー', colorClass: 'bg-red-500', borderClass: 'border-red-600', ringClass: 'ring-red-300', startIndex: 1 },
+            { id: 1, key: 'green', name: '緑プレイヤー', colorClass: 'bg-green-500', borderClass: 'border-green-600', ringClass: 'ring-green-300', startIndex: 14 },
+            { id: 2, key: 'yellow', name: '黄プレイヤー', colorClass: 'bg-yellow-400', borderClass: 'border-yellow-500', ringClass: 'ring-yellow-200', startIndex: 27 },
+            { id: 3, key: 'blue', name: '青プレイヤー', colorClass: 'bg-blue-500', borderClass: 'border-blue-600', ringClass: 'ring-blue-300', startIndex: 40 }
+        ];
+
+        // === ゲームステート ===
+        let state = {};
+
+        function initGame() {
+            state = {
+                players: PLAYER_CONFIG.map(config => ({
+                    ...config,
+                    pieces: [0, 0, 0, 0] // 0:ベース, 1~51:トラック, 52~56:ホームトラック, 57:ゴール
+                })),
+                turn: 0,
+                dice: null,
+                phase: 'ROLL', // ROLL または MOVE または END
+                message: 'ゲームスタート！赤の番です。'
+            };
+            
+            createBoardHTML();
+            renderUI();
+        }
+
+        // === ボードの描画 ===
+        function createBoardHTML() {
+            const container = document.getElementById('board-container');
+            container.innerHTML = ''; // クリア
+
+            for (let r = 0; r < 15; r++) {
+                for (let c = 0; c < 15; c++) {
+                    const cell = document.createElement('div');
+                    cell.id = `cell-${r}-${c}`;
+                    cell.className = 'w-full h-full relative flex flex-wrap justify-center items-center bg-white';
+                    
+                    // ベース領域（色分け）
+                    if (r < 6 && c < 6) configureBaseCell(cell, r, c, 0, 0, 'bg-red-500', 'bg-red-50');
+                    else if (r < 6 && c > 8) configureBaseCell(cell, r, c, 0, 9, 'bg-green-500', 'bg-green-50');
+                    else if (r > 8 && c > 8) configureBaseCell(cell, r, c, 9, 9, 'bg-yellow-400', 'bg-yellow-50');
+                    else if (r > 8 && c < 6) configureBaseCell(cell, r, c, 9, 0, 'bg-blue-500', 'bg-blue-50');
+                    
+                    // 中央エリア
+                    else if (r >= 6 && r <= 8 && c >= 6 && c <= 8) {
+                        cell.classList.remove('bg-white');
+                        
+                        if (r === 7 && c === 6) cell.classList.add('bg-red-500');
+                        else if (r === 6 && c === 7) cell.classList.add('bg-green-500');
+                        else if (r === 7 && c === 8) cell.classList.add('bg-yellow-400');
+                        else if (r === 8 && c === 7) cell.classList.add('bg-blue-500');
+                        else cell.classList.add('bg-gray-800'); // 中心点
+                    }
+                    // トラック・ホームエリア
+                    else {
+                        // ホームトラックの色
+                        if (r === 7 && c >= 1 && c <= 5) cell.classList.replace('bg-white', 'bg-red-100');
+                        if (c === 7 && r >= 1 && r <= 5) cell.classList.replace('bg-white', 'bg-green-100');
+                        if (r === 7 && c >= 9 && c <= 13) cell.classList.replace('bg-white', 'bg-yellow-100');
+                        if (c === 7 && r >= 9 && r <= 13) cell.classList.replace('bg-white', 'bg-blue-100');
+
+                        // スタートマスの色
+                        if (r === 6 && c === 1) cell.classList.replace('bg-white', 'bg-red-300');
+                        if (r === 1 && c === 8) cell.classList.replace('bg-white', 'bg-green-300');
+                        if (r === 8 && c === 13) cell.classList.replace('bg-white', 'bg-yellow-300');
+                        if (r === 13 && c === 6) cell.classList.replace('bg-white', 'bg-blue-300');
+
+                        // 安全地帯（星マーク）
+                        const pathIdx = path.findIndex(p => p[0] === r && p[1] === c);
+                        if (pathIdx !== -1 && safeSpots.includes(pathIdx)) {
+                            const star = document.createElement('div');
+                            star.textContent = '★';
+                            star.className = 'absolute text-gray-400 opacity-50 z-0 star-icon';
+                            cell.appendChild(star);
+                        }
+                    }
+
+                    container.appendChild(cell);
+                }
+            }
+        }
+
+        // ベースのデザイン設定ヘルパー
+        function configureBaseCell(cell, r, c, startR, startC, mainColor, lightColor) {
+            cell.classList.remove('bg-white');
+            cell.classList.add(mainColor);
+            
+            // ベースの内側の白い枠
+            if (r > startR && r < startR + 5 && c > startC && c < startC + 5) {
+                cell.classList.replace(mainColor, 'bg-white');
+                
+                // コマの配置場所（円形）を描画
+                for(let pId in basePositions) {
+                    basePositions[pId].forEach(pos => {
+                        if(pos[0] === r && pos[1] === c) {
+                            cell.classList.replace('bg-white', lightColor);
+                            const circle = document.createElement('div');
+                            circle.className = `w-4/5 h-4/5 rounded-full ${mainColor} opacity-20 absolute`;
+                            cell.appendChild(circle);
+                        }
+                    });
+                }
+            }
+        }
+
+        // === ゲームのロジックとUI更新 ===
+        function renderUI() {
+            const currentPlayer = state.players[state.turn];
+
+            // ターンカードの更新
+            const turnCard = document.getElementById('turn-card');
+            turnCard.className = `bg-white p-5 rounded-xl shadow-md border-t-8 transition-colors duration-300 ${currentPlayer.borderClass}`;
+            
+            document.getElementById('turn-name').innerHTML = `
+                <div class="w-6 h-6 rounded-full ${currentPlayer.colorClass}"></div>
+                ${currentPlayer.name}
+            `;
+            document.getElementById('game-message').textContent = state.message;
+
+            // サイコロボタンの更新
+            const diceBtn = document.getElementById('dice-btn');
+            if (state.dice) {
+                diceBtn.textContent = DICE_FACES[state.dice];
+                diceBtn.classList.add('text-black');
+            } else {
+                diceBtn.textContent = '🎲';
+                diceBtn.classList.remove('text-black');
+            }
+            diceBtn.disabled = (state.phase !== 'ROLL');
+
+            // ピースの描画
+            renderPieces();
+        }
+
+        function renderPieces() {
+            // 既存のピースをすべて削除
+            document.querySelectorAll('.piece-el').forEach(el => el.remove());
+
+            // セルごとのピース配置状況をまとめる
+            const piecePositionsMap = {};
+
+            const availableMoves = state.phase === 'MOVE' ? getAvailableMoves() : [];
+
+            state.players.forEach(player => {
+                player.pieces.forEach((progress, pieceIndex) => {
+                    let r, c;
+                    
+                    if (progress === 0) {
+                        [r, c] = basePositions[player.id][pieceIndex];
+                    } else if (progress <= 51) {
+                        const pathIdx = (player.startIndex + progress - 1) % 52;
+                        [r, c] = path[pathIdx];
+                    } else if (progress <= 56) {
+                        const homeIdx = progress - 52;
+                        [r, c] = homeTracks[player.id][homeIdx];
+                    } else if (progress === 57) {
+                        [r, c] = finishSpots[player.id];
+                    }
+
+                    const key = `${r}-${c}`;
+                    if (!piecePositionsMap[key]) piecePositionsMap[key] = [];
+                    
+                    const isMovable = availableMoves.some(m => m.pieceIndex === pieceIndex && player.id === state.turn);
+                    piecePositionsMap[key].push({ player, pieceIndex, progress, isMovable });
+                });
+            });
+
+            // セルにピースを配置
+            for (let key in piecePositionsMap) {
+                const [r, c] = key.split('-');
+                const cell = document.getElementById(`cell-${r}-${c}`);
+                if (!cell) continue;
+
+                const piecesInCell = piecePositionsMap[key];
+                // 1つのマスに複数ある場合はサイズを小さくする
+                const sizeClass = piecesInCell.length > 1 ? 'w-[40%] h-[40%] m-[5%]' : 'w-[70%] h-[70%]';
+
+                piecesInCell.forEach(p => {
+                    const pieceBtn = document.createElement('button');
+                    
+                    // ゴールしたピースは透過させる
+                    const opacityClass = p.progress === 57 ? 'opacity-60' : 'opacity-100 shadow-md';
+                    
+                    pieceBtn.className = `piece-el ${sizeClass} rounded-full border-[3px] border-white/80 z-10 flex items-center justify-center transition-all duration-300 ${p.player.colorClass} ${opacityClass} piece-enter`;
+                    
+                    if (p.isMovable) {
+                        pieceBtn.classList.add('cursor-pointer', 'animate-bounce', 'ring-4', p.player.ringClass, 'scale-110');
+                        pieceBtn.onclick = () => handlePieceClick(p.pieceIndex);
+                        pieceBtn.disabled = false;
+                    } else {
+                        pieceBtn.classList.add('cursor-default');
+                        pieceBtn.disabled = true;
+                    }
+
+                    cell.appendChild(pieceBtn);
+                });
+            }
+        }
+
+        // === サイコロと移動ロジック ===
+        function rollDice() {
+            if (state.phase !== 'ROLL') return;
+            
+            const diceBtn = document.getElementById('dice-btn');
+            diceBtn.classList.add('dice-rolling');
+            diceBtn.disabled = true;
+            state.message = 'サイコロを振っています...';
+            renderUI();
+
+            // アニメーション用のタイマー
+            setTimeout(() => {
+                diceBtn.classList.remove('dice-rolling');
+                
+                // 1〜6のランダム値
+                state.dice = Math.floor(Math.random() * 6) + 1;
+                
+                processRollResult();
+            }, 500);
+        }
+
+        function processRollResult() {
+            const moves = getAvailableMoves();
+
+            if (moves.length === 0) {
+                state.message = `「${state.dice}」が出ましたが、動かせるコマがありません。`;
+                renderUI();
+                
+                setTimeout(() => {
+                    if (state.dice === 6) {
+                        state.message = '6が出たため、もう一度サイコロを振れます。';
+                        state.dice = null;
+                        state.phase = 'ROLL';
+                    } else {
+                        progressTurn();
+                    }
+                    renderUI();
+                }, 2000);
+            } else {
+                state.phase = 'MOVE';
+                state.message = `「${state.dice}」が出ました。光っているコマを選んで移動してください。`;
+                
+                // 動かせるコマが1つだけなら自動で移動（テンポ良くするため）
+                // ただし、ユーザー自身で選ばせたい場合は以下のブロックを削除します。
+                if (moves.length === 1) {
+                    setTimeout(() => handlePieceClick(moves[0].pieceIndex), 400);
+                } else {
+                    renderUI();
+                }
+            }
+        }
+
+        function getAvailableMoves() {
+            const player = state.players[state.turn];
+            const moves = [];
+
+            player.pieces.forEach((progress, index) => {
+                if (progress === 0) {
+                    // ベースにいるコマは6が出た時のみ出撃可能
+                    if (state.dice === 6) moves.push({ pieceIndex: index });
+                } else if (progress < 57) {
+                    // 盤上にいるコマは、ゴール(57)を超えない範囲で移動可能
+                    if (progress + state.dice <= 57) moves.push({ pieceIndex: index });
+                }
+            });
+
+            return moves;
+        }
+
+        function handlePieceClick(pieceIndex) {
+            if (state.phase !== 'MOVE') return;
+
+            const player = state.players[state.turn];
+            const currentProgress = player.pieces[pieceIndex];
+
+            if (currentProgress === 0 && state.dice === 6) {
+                // ベースからスタート地点へ
+                player.pieces[pieceIndex] = 1;
+                state.message = `${player.name}がコマを出撃させました！`;
+            } else {
+                // 盤上を進む
+                player.pieces[pieceIndex] += state.dice;
+            }
+
+            // 移動後の処理（キャプチャ判定、勝利判定、ターン移行）
+            finalizeMove(player, pieceIndex);
+        }
+
+        function finalizeMove(player, pieceIndex) {
+            const progress = player.pieces[pieceIndex];
+            let captured = false;
+
+            // ゴール前ならキャプチャ（他のコマを食べる）判定
+            if (progress > 0 && progress <= 51) {
+                const pathIdx = (player.startIndex + progress - 1) % 52;
+                
+                // 安全地帯でなければ判定
+                if (!safeSpots.includes(pathIdx)) {
+                    state.players.forEach(otherPlayer => {
+                        if (otherPlayer.id !== player.id) {
+                            otherPlayer.pieces.forEach((otherProgress, otherIdx) => {
+                                if (otherProgress > 0 && otherProgress <= 51) {
+                                    const otherPathIdx = (otherPlayer.startIndex + otherProgress - 1) % 52;
+                                    if (otherPathIdx === pathIdx) {
+                                        // キャプチャ発生！相手のコマをベース(0)に戻す
+                                        otherPlayer.pieces[otherIdx] = 0;
+                                        captured = true;
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            }
+
+            // 勝利判定
+            const hasWon = player.pieces.every(p => p === 57);
+            if (hasWon) {
+                state.message = `🎉 ${player.name}の勝利です！！ 🎉`;
+                state.phase = 'END';
+                renderUI();
+                return;
+            }
+
+            // ターン移行処理
+            let msgSuffix = captured ? '相手のコマをベースに戻しました！' : '';
+
+            if (state.dice === 6) {
+                state.phase = 'ROLL';
+                state.dice = null;
+                state.message = `${msgSuffix} 6が出たので、続けてサイコロを振れます。`;
+            } else {
+                // キャプチャした場合も追加ターンをあげるルールが一般的ですが、今回はシンプルに6のみとします
+                progressTurn(msgSuffix);
+            }
+
+            renderUI();
+        }
+
+        function progressTurn(msgPrefix = '') {
+            state.turn = (state.turn + 1) % 4;
+            state.phase = 'ROLL';
+            state.dice = null;
+            const nextPlayer = state.players[state.turn];
+            state.message = msgPrefix ? `${msgPrefix} 次は ${nextPlayer.name} の番です。` : `${nextPlayer.name}の番です。サイコロを振ってください。`;
+        }
+
+        // 初期化実行
+        initGame();
+
+    </script>
+</body>
+</html>
