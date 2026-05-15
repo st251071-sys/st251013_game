@@ -157,10 +157,10 @@
 
         // プレイヤー定義
         const PLAYER_CONFIG = [
-            { id: 0, key: 'red', name: '赤プレイヤー', colorClass: 'bg-red-500', borderClass: 'border-red-600', ringClass: 'ring-red-300', startIndex: 1 },
-            { id: 1, key: 'green', name: '緑プレイヤー', colorClass: 'bg-green-500', borderClass: 'border-green-600', ringClass: 'ring-green-300', startIndex: 14 },
-            { id: 2, key: 'yellow', name: '黄プレイヤー', colorClass: 'bg-yellow-400', borderClass: 'border-yellow-500', ringClass: 'ring-yellow-200', startIndex: 27 },
-            { id: 3, key: 'blue', name: '青プレイヤー', colorClass: 'bg-blue-500', borderClass: 'border-blue-600', ringClass: 'ring-blue-300', startIndex: 40 }
+            { id: 0, key: 'red', name: 'あなた (赤)', colorClass: 'bg-red-500', borderClass: 'border-red-600', ringClass: 'ring-red-300', startIndex: 1, isCPU: false },
+            { id: 1, key: 'green', name: 'CPU (緑)', colorClass: 'bg-green-500', borderClass: 'border-green-600', ringClass: 'ring-green-300', startIndex: 14, isCPU: true },
+            { id: 2, key: 'yellow', name: 'CPU (黄)', colorClass: 'bg-yellow-400', borderClass: 'border-yellow-500', ringClass: 'ring-yellow-200', startIndex: 27, isCPU: true },
+            { id: 3, key: 'blue', name: 'CPU (青)', colorClass: 'bg-blue-500', borderClass: 'border-blue-600', ringClass: 'ring-blue-300', startIndex: 40, isCPU: true }
         ];
 
         // === ゲームステート ===
@@ -175,11 +175,12 @@
                 turn: 0,
                 dice: null,
                 phase: 'ROLL', // ROLL または MOVE または END
-                message: 'ゲームスタート！赤の番です。'
+                message: 'ゲームスタート！あなたの番です。'
             };
             
             createBoardHTML();
             renderUI();
+            checkCPUTurn();
         }
 
         // === ボードの描画 ===
@@ -284,7 +285,7 @@
                 diceBtn.textContent = '🎲';
                 diceBtn.classList.remove('text-black');
             }
-            diceBtn.disabled = (state.phase !== 'ROLL');
+            diceBtn.disabled = (state.phase !== 'ROLL' || currentPlayer.isCPU);
 
             // ピースの描画
             renderPieces();
@@ -318,7 +319,7 @@
                     const key = `${r}-${c}`;
                     if (!piecePositionsMap[key]) piecePositionsMap[key] = [];
                     
-                    const isMovable = availableMoves.some(m => m.pieceIndex === pieceIndex && player.id === state.turn);
+                    const isMovable = availableMoves.some(m => m.pieceIndex === pieceIndex && player.id === state.turn) && !state.players[state.turn].isCPU;
                     piecePositionsMap[key].push({ player, pieceIndex, progress, isMovable });
                 });
             });
@@ -388,21 +389,32 @@
                         state.message = '6が出たため、もう一度サイコロを振れます。';
                         state.dice = null;
                         state.phase = 'ROLL';
+                        renderUI();
+                        checkCPUTurn();
                     } else {
                         progressTurn();
                     }
-                    renderUI();
                 }, 2000);
             } else {
                 state.phase = 'MOVE';
-                state.message = `「${state.dice}」が出ました。光っているコマを選んで移動してください。`;
+                const currentPlayer = state.players[state.turn];
+                state.message = `「${state.dice}」が出ました。${currentPlayer.isCPU ? 'CPUが考えています...' : '光っているコマを選んで移動してください。'}`;
+                renderUI();
                 
-                // 動かせるコマが1つだけなら自動で移動（テンポ良くするため）
-                // ただし、ユーザー自身で選ばせたい場合は以下のブロックを削除します。
-                if (moves.length === 1) {
-                    setTimeout(() => handlePieceClick(moves[0].pieceIndex), 400);
+                if (currentPlayer.isCPU) {
+                    // CPUのコマ選択ロジック（少し遅延を入れる）
+                    setTimeout(() => {
+                        // 出撃できるコマがあれば優先して出撃、なければランダム
+                        const deployMove = moves.find(m => currentPlayer.pieces[m.pieceIndex] === 0);
+                        const selectedIndex = deployMove ? deployMove.pieceIndex : moves[Math.floor(Math.random() * moves.length)].pieceIndex;
+                        handlePieceClick(selectedIndex);
+                    }, 1500);
                 } else {
-                    renderUI();
+                    // 人間の場合は、1つしか動かせないなら自動で動かす
+                    // ただし、ユーザー自身で選ばせたい場合は以下のブロックを削除します。
+                    if (moves.length === 1) {
+                        setTimeout(() => handlePieceClick(moves[0].pieceIndex), 400);
+                    }
                 }
             }
         }
@@ -486,12 +498,12 @@
                 state.phase = 'ROLL';
                 state.dice = null;
                 state.message = `${msgSuffix} 6が出たので、続けてサイコロを振れます。`;
+                renderUI();
+                checkCPUTurn();
             } else {
                 // キャプチャした場合も追加ターンをあげるルールが一般的ですが、今回はシンプルに6のみとします
                 progressTurn(msgSuffix);
             }
-
-            renderUI();
         }
 
         function progressTurn(msgPrefix = '') {
@@ -499,7 +511,18 @@
             state.phase = 'ROLL';
             state.dice = null;
             const nextPlayer = state.players[state.turn];
-            state.message = msgPrefix ? `${msgPrefix} 次は ${nextPlayer.name} の番です。` : `${nextPlayer.name}の番です。サイコロを振ってください。`;
+            state.message = msgPrefix ? `${msgPrefix} 次は ${nextPlayer.name} の番です。` : `${nextPlayer.name}の番です。`;
+            renderUI();
+            checkCPUTurn();
+        }
+
+        function checkCPUTurn() {
+            const currentPlayer = state.players[state.turn];
+            if (state.phase === 'ROLL' && currentPlayer.isCPU) {
+                setTimeout(() => {
+                    rollDice();
+                }, 1000);
+            }
         }
 
         // 初期化実行
