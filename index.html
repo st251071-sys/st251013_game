@@ -101,7 +101,7 @@
             <!-- ルール説明 -->
             <div class="bg-blue-50 p-4 rounded-lg text-xs text-blue-800 shadow-sm mt-4">
                 <ul class="list-disc list-inside space-y-1">
-                    <li>サイコロで<span class="font-bold text-red-500">6</span>が出ると、コマをスタート地点に出せます。</li>
+                    <li>サイコロで<span class="font-bold text-red-500">5</span>か<span class="font-bold text-red-500">6</span>が出ると、コマをスタート地点に出せます。</li>
                     <li>6が出た場合はもう一度サイコロを振れます。</li>
                     <li>他のプレイヤーのコマが止まっているマスに止まると、そのコマをベースに戻せます（★マークの安全地帯を除く）。</li>
                     <li>4つのコマすべてを中央のゴールに入れたプレイヤーの勝利です。</li>
@@ -425,8 +425,8 @@
 
             player.pieces.forEach((progress, index) => {
                 if (progress === 0) {
-                    // ベースにいるコマは6が出た時のみ出撃可能
-                    if (state.dice === 6) moves.push({ pieceIndex: index });
+                    // ベースにいるコマは5か6が出た時に出撃可能
+                    if (state.dice === 5 || state.dice === 6) moves.push({ pieceIndex: index });
                 } else if (progress < 57) {
                     // 盤上にいるコマは、ゴール(57)を超えない範囲で移動可能
                     if (progress + state.dice <= 57) moves.push({ pieceIndex: index });
@@ -442,7 +442,7 @@
             const player = state.players[state.turn];
             const currentProgress = player.pieces[pieceIndex];
 
-            if (currentProgress === 0 && state.dice === 6) {
+            if (currentProgress === 0 && (state.dice === 5 || state.dice === 6)) {
                 // ベースからスタート地点へ
                 player.pieces[pieceIndex] = 1;
                 state.message = `${player.name}がコマを出撃させました！`;
